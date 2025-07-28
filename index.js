@@ -2,8 +2,9 @@ const fs = require('fs');
 const readline = require('readline');
 const axios = require('axios');
 
-// File to store the credentials
+// Files to store the credentials and tokens
 const CREDENTIALS_FILE = 'trakt_credentials.json';
+const TOKEN_FILE = 'trakt_token.json';
 
 // Global variables
 let client_id, client_secret, username;
@@ -25,7 +26,79 @@ const askQuestion = (question) => {
     });
 };
 
-// Credentials management
+// Token management
+const saveTokens = (tokenData) => {
+    const tokens = {
+        access_token: tokenData.access_token,
+        refresh_token: tokenData.refresh_token,
+        expires_in: tokenData.expires_in,
+        created_at: Math.floor(Date.now() / 1000) // Current timestamp in seconds
+    };
+    
+    fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokens, null, 2));
+    console.log(`Tokens saved to ${TOKEN_FILE}\n`);
+};
+
+const loadTokens = () => {
+    if (fs.existsSync(TOKEN_FILE)) {
+        const data = fs.readFileSync(TOKEN_FILE, 'utf8');
+        return JSON.parse(data);
+    }
+    return null;
+};
+
+const isTokenExpired = (tokenData) => {
+    if (!tokenData || !tokenData.created_at || !tokenData.expires_in) {
+        return true;
+    }
+    
+    const currentTime = Math.floor(Date.now() / 1000);
+    const expirationTime = tokenData.created_at + tokenData.expires_in;
+    
+    // Add 5 minute buffer before expiration
+    return currentTime >= (expirationTime - 300);
+};
+
+const refreshAccessToken = async () => {
+    const tokenData = loadTokens();
+    
+    if (!tokenData || !tokenData.refresh_token) {
+        console.log('No refresh token found. Need to authenticate.');
+        return null;
+    }
+    
+    console.log('Attempting to refresh access token...');
+    
+    const postData = {
+        refresh_token: tokenData.refresh_token,
+        client_id: client_id,
+        client_secret: client_secret,
+        redirect_uri: 'urn:ietf:wg:oauth:2.0:oob',
+        grant_type: 'refresh_token'
+    };
+    
+    try {
+        const tempSession = axios.create({
+            headers: {
+                'Accept': 'application/json',
+                'User-Agent': 'Betaseries to Trakt',
+                'Connection': 'Keep-Alive'
+            }
+        });
+        
+        const response = await tempSession.post(auth_get_token_url, postData);
+        console.log('Access token refreshed successfully!');
+        
+        // Save the new tokens
+        saveTokens(response.data);
+        
+        return response.data;
+    } catch (error) {
+        console.error('Failed to refresh token:', error.response?.data || error.message);
+        console.log('Will need to re-authenticate with PIN.');
+        return null;
+    }
+};
 const saveCredentials = (clientId, clientSecret, user) => {
     const credentials = {
         client_id: clientId,
@@ -64,15 +137,34 @@ const getCredentials = async () => {
 
 // Authentication
 const loginToTrakt = async () => {
-    console.log('Authentication');
+    // First, try to use existing tokens
+    const existingTokens = loadTokens();
+    
+    if (existingTokens && !isTokenExpired(existingTokens)) {
+        console.log('Using existing valid access token...');
+        setupSessionWithToken(existingTokens.access_token);
+        return;
+    }
+    
+    // Try to refresh token if we have one
+    if (existingTokens && existingTokens.refresh_token) {
+        const refreshedTokens = await refreshAccessToken();
+        if (refreshedTokens) {
+            setupSessionWithToken(refreshedTokens.access_token);
+            return;
+        }
+    }
+    
+    // If all else fails, do PIN authentication
+    console.log('Authentication required');
     console.log('Open the link in a browser and paste the pin');
     console.log(`https://trakt.tv/oauth/authorize?response_type=code&client_id=${client_id}&redirect_uri=urn:ietf:wg:oauth:2.0:oob`);
     console.log('');
     
     const pin = await askQuestion('Pin: ');
     
-    // Configure axios instance
-    session = axios.create({
+    // Configure temporary axios instance for authentication
+    const tempSession = axios.create({
         headers: {
             'Accept': 'application/json',
             'User-Agent': 'Betaseries to Trakt',
@@ -89,20 +181,34 @@ const loginToTrakt = async () => {
     };
     
     try {
-        const response = await session.post(auth_get_token_url, postData);
-        console.log(response.data);
-        console.log('');
+        const response = await tempSession.post(auth_get_token_url, postData);
+        console.log('Authentication successful!');
         
-        // Update session headers with auth token
-        session.defaults.headers.common['Content-Type'] = 'application/json';
-        session.defaults.headers.common['trakt-api-version'] = '2';
-        session.defaults.headers.common['trakt-api-key'] = client_id;
-        session.defaults.headers.common['Authorization'] = `Bearer ${response.data.access_token}`;
+        // Save tokens for future use
+        saveTokens(response.data);
+        
+        // Setup session with new token
+        setupSessionWithToken(response.data.access_token);
         
     } catch (error) {
         console.error('Authentication failed:', error.response?.data || error.message);
         process.exit(1);
     }
+};
+
+const setupSessionWithToken = (accessToken) => {
+    // Configure axios instance with authentication
+    session = axios.create({
+        headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'Betaseries to Trakt',
+            'Connection': 'Keep-Alive',
+            'Content-Type': 'application/json',
+            'trakt-api-version': '2',
+            'trakt-api-key': client_id,
+            'Authorization': `Bearer ${accessToken}`
+        }
+    });
 };
 
 // Fetch history
@@ -142,13 +248,82 @@ const getHistory = async (type) => {
     return results;
 };
 
-// Remove duplicates
+// List duplicates (view only)
+const listDuplicates = async (history, type, keepPerDay) => {
+    console.log(`Checking for ${type} duplicates`);
+    
+    const entryType = type === 'movies' ? 'movie' : 'episode';
+    const entries = {};
+    const duplicateGroups = {}; // Group duplicates by content
+    
+    // Process history in reverse order
+    for (const item of history.reverse()) {
+        const traktId = item[entryType].ids.trakt;
+        const watchedDate = item.watched_at.split('T')[0];
+        
+        if (traktId in entries) {
+            if (!keepPerDay || watchedDate === entries[traktId]) {
+                // This is a duplicate
+                if (!(traktId in duplicateGroups)) {
+                    duplicateGroups[traktId] = [];
+                    // Find and add the original entry
+                    const originalItem = history.find(h => h[entryType].ids.trakt === traktId && h.id !== item.id);
+                    if (originalItem) {
+                        duplicateGroups[traktId].push(originalItem);
+                    }
+                }
+                duplicateGroups[traktId].push(item);
+            }
+        } else {
+            entries[traktId] = watchedDate;
+        }
+    }
+    
+    const duplicateCount = Object.values(duplicateGroups).reduce((total, group) => total + group.length - 1, 0);
+    
+    if (duplicateCount > 0) {
+        console.log(`\n${duplicateCount} ${type} duplicate plays found across ${Object.keys(duplicateGroups).length} titles:`);
+        console.log('=====================================');
+        
+        // Display duplicates grouped by content
+        Object.entries(duplicateGroups).forEach(([traktId, items]) => {
+            const firstItem = items[0];
+            
+            if (type === 'movies') {
+                const movieTitle = firstItem.movie.title;
+                const releaseYear = firstItem.movie.year || 'Unknown Year';
+                console.log(`\n📽️  ${movieTitle} (${releaseYear}) - ${items.length} plays:`);
+            } else {
+                const showName = firstItem.show ? firstItem.show.title : '';
+                const season = firstItem[entryType].season;
+                const episode = firstItem[entryType].number;
+                const episodeTitle = firstItem[entryType].title;
+                const seasonStr = season.toString().padStart(2, '0');
+                const episodeStr = episode.toString().padStart(2, '0');
+                console.log(`\n📺 ${showName} - S${seasonStr}E${episodeStr} - ${episodeTitle} - ${items.length} plays:`);
+            }
+            
+            // Show all plays for this content
+            items.forEach((item, idx) => {
+                const watchedAt = item.watched_at;
+                console.log(`   ${idx + 1}. ${watchedAt}`);
+            });
+        });
+        
+        console.log('=====================================');
+        console.log(`\nTotal: ${duplicateCount} duplicate entries found that would be removed.`);
+        console.log(`Note: This is view-only mode. Use option 1 to actually remove duplicates.`);
+    } else {
+        console.log(`No ${type} duplicates found`);
+    }
+};
 const removeDuplicate = async (history, type, keepPerDay) => {
-    console.log(`Removing ${type} duplicates`);
+    console.log(`Checking for ${type} duplicates`);
     
     const entryType = type === 'movies' ? 'movie' : 'episode';
     const entries = {};
     const duplicates = [];
+    const duplicateItems = []; // Store full duplicate items for display
     
     // Process history in reverse order
     for (const item of history.reverse()) {
@@ -158,6 +333,7 @@ const removeDuplicate = async (history, type, keepPerDay) => {
         if (traktId in entries) {
             if (!keepPerDay || watchedDate === entries[traktId]) {
                 duplicates.push(item.id);
+                duplicateItems.push(item);
             }
         } else {
             entries[traktId] = watchedDate;
@@ -165,13 +341,43 @@ const removeDuplicate = async (history, type, keepPerDay) => {
     }
     
     if (duplicates.length > 0) {
-        console.log(`${duplicates.length} ${type} duplicate plays to be removed`);
+        console.log(`\n${duplicates.length} ${type} duplicate plays found:`);
+        console.log('=====================================');
         
-        try {
-            await session.post(sync_history_url, { ids: duplicates });
-            console.log(`${duplicates.length} ${type} duplicates successfully removed!`);
-        } catch (error) {
-            console.error('Error removing duplicates:', error.response?.data || error.message);
+        // Display duplicates to user
+        duplicateItems.forEach((item, idx) => {
+            const watchedAt = item.watched_at;
+            
+            if (type === 'movies') {
+                const movieTitle = item.movie.title;
+                const releaseYear = item.movie.year || 'Unknown Year';
+                console.log(`[${idx}] ${watchedAt} - ${movieTitle} (${releaseYear})`);
+            } else {
+                const showName = item.show ? item.show.title : '';
+                const season = item[entryType].season;
+                const episode = item[entryType].number;
+                const episodeTitle = item[entryType].title;
+                const seasonStr = season.toString().padStart(2, '0');
+                const episodeStr = episode.toString().padStart(2, '0');
+                console.log(`[${idx}] ${watchedAt} - ${showName} - S${seasonStr}E${episodeStr} - ${episodeTitle}`);
+            }
+        });
+        
+        console.log('=====================================');
+        console.log(`\nThese ${duplicates.length} duplicate ${type} entries will be removed from your Trakt history.`);
+        
+        // Ask for confirmation
+        const confirm = await askQuestion("Do you want to proceed with removing these duplicates? (y/n): ");
+        
+        if (confirm.toLowerCase().trim() === 'y') {
+            try {
+                await session.post(sync_history_url, { ids: duplicates });
+                console.log(`${duplicates.length} ${type} duplicates successfully removed!`);
+            } catch (error) {
+                console.error('Error removing duplicates:', error.response?.data || error.message);
+            }
+        } else {
+            console.log(`Duplicate removal for ${type} cancelled.`);
         }
     } else {
         console.log(`No ${type} duplicates found`);
@@ -273,7 +479,8 @@ const main = async () => {
         console.log("\nSelect an operation:");
         console.log("[1] Bulk remove duplicate plays at any date");
         console.log("[2] Bulk remove plays from a specified date");
-        const operation = await askQuestion("Enter the number of the operation (1 or 2): ");
+        console.log("[3] List duplicate plays across any date (view only)");
+        const operation = await askQuestion("Enter the number of the operation (1, 2, or 3): ");
         
         // Ask for target
         console.log("\nDo you want to affect:");
@@ -333,8 +540,26 @@ const main = async () => {
                 // Remove plays from the specified date
                 await removePlaysFromSpecificDate(history, type, specificDate.trim());
             }
+        } else if (operation.trim() === '3') {
+            // List duplicates (view only)
+            console.log("\nYou have selected: List duplicate plays (view only)");
+            const keepPerDayInput = await askQuestion("Do you want to consider entries on the same day as duplicates? (y/n): ");
+            const keepPerDay = keepPerDayInput.trim().toLowerCase() === 'y';
+            console.log("\nSearching for duplicates...\n");
+            
+            // Loop through types (movies, episodes)
+            for (const type of types) {
+                console.log(type === 'movies' ? " ***** MOVIES *****" : " ***** EPISODES *****");
+                const history = await getHistory(type);
+                
+                // Save history to file
+                fs.writeFileSync(`${type}.json`, JSON.stringify(history, null, 4));
+                console.log(`History saved in file ${type}.json`);
+                
+                await listDuplicates(history, type, keepPerDay);
+            }
         } else {
-            console.log("Invalid option. Please enter '1' or '2'.");
+            console.log("Invalid option. Please enter '1', '2', or '3'.");
         }
         
     } catch (error) {
