@@ -2,3 +2,4 @@ movies.json
 episodes.json
 trakt_credentials.json
 trakt_token.json
+node_modules/
