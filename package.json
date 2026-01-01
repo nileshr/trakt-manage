@@ -11,11 +11,11 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "drizzle-orm": "^0.39.0",
-    "better-sqlite3": "^11.0.0"
+    "drizzle-orm": "^0.39.0"
   },
   "scripts": {
     "build": "bun build ./index.ts --compile --outfile trakt-manage",
-    "dev": "bun run index.ts"
+    "dev": "bun run index.ts",
+    "db:push": "drizzle-kit push"
   }
 }
