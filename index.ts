@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { initializeDatabase } from "./db";
-import { TraktClient } from "./trakt";
+import { TraktClient, type TraktHistoryItem } from "./trakt";
 import { history, config } from "./db/schema";
 import { db } from "./db";
 import { eq, and } from "drizzle-orm";
@@ -46,7 +46,7 @@ function parseOptions(args: string[]) {
     return opts;
 }
 
-async function saveHistoryToDb(items: any[], type: string) {
+async function saveHistoryToDb(items: TraktHistoryItem[], type: string) {
     console.log(`Saving ${items.length} ${type} to database...`);
     // Clear existing for this type to avoid mess? Or upsert?
     // Original script overwrote JSONs.
@@ -56,9 +56,10 @@ async function saveHistoryToDb(items: any[], type: string) {
     const batchSize = 100;
     for (let i = 0; i < items.length; i += batchSize) {
         const batch = items.slice(i, i + batchSize);
-        const values = batch.map((item: any) => {
+        const values = batch.map((item) => {
              const entryType = type === 'movies' ? 'movie' : 'episode';
-             const entryData = item[entryType];
+             // Type assertion safely because we know the structure from Trakt
+             const entryData = item[entryType] as any;
              return {
                  traktId: entryData.ids.trakt,
                  type: entryType,
@@ -75,10 +76,10 @@ async function saveHistoryToDb(items: any[], type: string) {
     console.log("Database updated.");
 }
 
-async function getHistoryFromDb(type: 'movies' | 'episodes') {
+async function getHistoryFromDb(type: 'movies' | 'episodes'): Promise<TraktHistoryItem[]> {
     const entryType = type === 'movies' ? 'movie' : 'episode';
     const rows = await db.select().from(history).where(eq(history.type, entryType));
-    return rows.map(r => JSON.parse(r.rawJson || '{}'));
+    return rows.map(r => JSON.parse(r.rawJson || '{}')) as TraktHistoryItem[];
 }
 
 async function main() {
@@ -93,92 +94,120 @@ async function main() {
     const command = args[0];
     const opts = parseOptions(args.slice(1));
     const client = new TraktClient();
-    await client.init();
+    try {
+        await client.init();
 
-    if (command === 'auth') {
-        await client.authenticate();
-        console.log("Authenticated successfully.");
-        return;
-    }
-
-    if (command === 'sync') {
-        const typeArg = opts.args[0] || 'all';
-        const types = typeArg === 'all' ? ['movies', 'episodes'] : [typeArg];
-        
-        for (const t of types) {
-             const items = await client.getHistory(t as any);
-             await saveHistoryToDb(items, t);
-        }
-        return;
-    }
-
-    if (command === 'duplicates') {
-        const typeArg = opts.args[0];
-        if (!typeArg || (typeArg !== 'movies' && typeArg !== 'episodes')) {
-            console.error("Please specify type: movies or episodes");
+        if (command === 'auth') {
+            await client.authenticate();
+            console.log("Authenticated successfully.");
             return;
         }
 
-        // Try load from DB first
-        let items = await getHistoryFromDb(typeArg as any);
-        if (items.length === 0) {
-            console.log("No local history found. Syncing...");
-            items = await client.getHistory(typeArg as any);
-            await saveHistoryToDb(items, typeArg);
-        }
-
-        const keepPerDay = !!opts.daily;
-        const fix = !!opts.fix;
-        const entryType = typeArg === 'movies' ? 'movie' : 'episode';
-        
-        const seen: Record<string, string> = {}; // id -> date
-        const duplicates: any[] = [];
-        const duplicateGroups: Record<string, any[]> = {};
-
-        // Process in reverse (oldest first? original script said "reverse order")
-        // Original: entries[traktId] = watchedDate. if exists -> duplicate.
-        // If we process reverse (oldest first), the first one we see is the "original" (kept).
-        // Later ones are duplicates.
-        // Wait, original script: `history.reverse()`.
-        // If history comes from API, it's usually newest first.
-        // Reverse -> Oldest first.
-        // loop:
-        //   item (oldest) -> seen[id] = date.
-        //   item (newer) -> seen[id] exists -> duplicate.
-        // So we keep the OLDEST play.
-
-        const sortedItems = [...items].sort((a, b) => new Date(a.watched_at).getTime() - new Date(b.watched_at).getTime());
-        
-        for (const item of sortedItems) {
-            const traktId = item[entryType].ids.trakt;
-            const date = item.watched_at.split('T')[0];
+        if (command === 'sync') {
+            const typeArg = opts.args[0] || 'all';
+            const types = typeArg === 'all' ? ['movies', 'episodes'] : [typeArg];
             
-            if (seen[traktId]) {
-                if (!keepPerDay || seen[traktId] === date) {
-                    duplicates.push(item);
-                    if (!duplicateGroups[traktId]) duplicateGroups[traktId] = [];
-                    duplicateGroups[traktId].push(item);
-                }
-            } else {
-                seen[traktId] = date;
+            for (const t of types) {
+                 const items = await client.getHistory(t as any);
+                 await saveHistoryToDb(items, t);
             }
+            return;
         }
 
-        console.log(`Found ${duplicates.length} duplicates.`);
-        
-        if (duplicates.length > 0) {
-             // Print details...
-             for (const item of duplicates) {
-                 const title = item[entryType].title;
-                 console.log(`[${item.watched_at}] ${title} (${item.id})`);
-             }
+        if (command === 'duplicates') {
+            const typeArg = opts.args[0];
+            if (!typeArg || (typeArg !== 'movies' && typeArg !== 'episodes')) {
+                console.error("Please specify type: movies or episodes");
+                return;
+            }
 
-             if (fix) {
+            // Try load from DB first
+            let items = await getHistoryFromDb(typeArg as any);
+            if (items.length === 0) {
+                console.log("No local history found. Syncing...");
+                items = await client.getHistory(typeArg as any);
+                await saveHistoryToDb(items, typeArg);
+            }
+
+            const keepPerDay = !!opts.daily;
+            const fix = !!opts.fix;
+            const entryType = typeArg === 'movies' ? 'movie' : 'episode';
+            
+            const seen: Record<string, string> = {}; // id -> date
+            const duplicates: TraktHistoryItem[] = [];
+            const duplicateGroups: Record<string, TraktHistoryItem[]> = {};
+
+            const sortedItems = [...items].sort((a, b) => new Date(a.watched_at).getTime() - new Date(b.watched_at).getTime());
+            
+            for (const item of sortedItems) {
+                // @ts-ignore
+                const traktId = item[entryType].ids.trakt;
+                const date = item.watched_at.split('T')[0];
+                
+                if (seen[traktId]) {
+                    if (!keepPerDay || seen[traktId] === date) {
+                        duplicates.push(item);
+                        if (!duplicateGroups[traktId]) duplicateGroups[traktId] = [];
+                        duplicateGroups[traktId].push(item);
+                    }
+                } else {
+                    seen[traktId] = date;
+                }
+            }
+
+            console.log(`Found ${duplicates.length} duplicates.`);
+            
+            if (duplicates.length > 0) {
+                 // Print details...
+                 for (const item of duplicates) {
+                     // @ts-ignore
+                     const title = item[entryType].title;
+                     console.log(`[${item.watched_at}] ${title} (${item.id})`);
+                 }
+
+                 if (fix) {
+                     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+                     rl.question(`Delete ${duplicates.length} items? (y/N) `, async (ans) => {
+                         if (ans.toLowerCase() === 'y') {
+                             const ids = duplicates.map(d => d.id);
+                             await client.removeHistory(ids);
+                             console.log("Removed.");
+                             // Resync
+                             const newItems = await client.getHistory(typeArg as any);
+                             await saveHistoryToDb(newItems, typeArg);
+                         }
+                         rl.close();
+                     });
+                 }
+            }
+            return;
+        }
+
+        if (command === 'remove-date') {
+            const date = opts.args[0];
+            const typeArg = opts.args[1];
+
+            if (!date || !typeArg) {
+                console.error("Usage: trakt remove-date <YYYY-MM-DD> <type>");
+                return;
+            }
+
+            let items = await getHistoryFromDb(typeArg as any);
+             if (items.length === 0) {
+                items = await client.getHistory(typeArg as any);
+                await saveHistoryToDb(items, typeArg);
+            }
+
+            const toRemove = items.filter(i => i.watched_at.startsWith(date));
+            console.log(`Found ${toRemove.length} items on ${date}`);
+            // @ts-ignore
+            toRemove.forEach(i => console.log(` - ${i[typeArg === 'movies' ? 'movie' : 'episode'].title}`));
+
+            if (toRemove.length > 0) {
                  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-                 rl.question(`Delete ${duplicates.length} items? (y/N) `, async (ans) => {
+                 rl.question("Remove these plays? (y/N) ", async (ans) => {
                      if (ans.toLowerCase() === 'y') {
-                         const ids = duplicates.map(d => d.id);
-                         await client.removeHistory(ids);
+                         await client.removeHistory(toRemove.map(i => i.id));
                          console.log("Removed.");
                          // Resync
                          const newItems = await client.getHistory(typeArg as any);
@@ -186,47 +215,13 @@ async function main() {
                      }
                      rl.close();
                  });
-             }
-        }
-        return;
-    }
-
-    if (command === 'remove-date') {
-        const date = opts.args[0];
-        const typeArg = opts.args[1];
-
-        if (!date || !typeArg) {
-            console.error("Usage: trakt remove-date <YYYY-MM-DD> <type>");
+            }
             return;
         }
 
-        let items = await getHistoryFromDb(typeArg as any);
-         if (items.length === 0) {
-            items = await client.getHistory(typeArg as any);
-            await saveHistoryToDb(items, typeArg);
-        }
-
-        const toRemove = items.filter(i => i.watched_at.startsWith(date));
-        console.log(`Found ${toRemove.length} items on ${date}`);
-        toRemove.forEach(i => console.log(` - ${i[typeArg === 'movies' ? 'movie' : 'episode'].title}`));
-
-        if (toRemove.length > 0) {
-             const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-             rl.question("Remove these plays? (y/N) ", async (ans) => {
-                 if (ans.toLowerCase() === 'y') {
-                     await client.removeHistory(toRemove.map(i => i.id));
-                     console.log("Removed.");
-                     // Resync
-                     const newItems = await client.getHistory(typeArg as any);
-                     await saveHistoryToDb(newItems, typeArg);
-                 }
-                 rl.close();
-             });
-        }
-        return;
+        printHelp();
+    } catch (e) {
+        console.error("An error occurred:", e);
+        process.exit(1);
     }
-
-    printHelp();
 }
-
-main().catch(console.error);
