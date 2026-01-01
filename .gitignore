@@ -3,3 +3,8 @@ episodes.json
 trakt_credentials.json
 trakt_token.json
 node_modules/
+trakt.db
+drizzle/
+bun.lock
+trakt-manage
+.DS_Store
