@@ -17,6 +17,29 @@ interface Credentials {
     username: string;
 }
 
+export interface TraktHistoryItem {
+    id: number;
+    watched_at: string;
+    action: string;
+    type: 'movie' | 'episode';
+    movie?: {
+        title: string;
+        year: number;
+        ids: { trakt: number; slug: string; imdb: string; tmdb: number };
+    };
+    show?: {
+        title: string;
+        year: number;
+        ids: { trakt: number; slug: string; imdb: string; tmdb: number };
+    };
+    episode?: {
+        season: number;
+        number: number;
+        title: string;
+        ids: { trakt: number; imdb: string; tmdb: number };
+    };
+}
+
 function askQuestion(query: string): Promise<string> {
     const rl = readline.createInterface({
         input: process.stdin,
@@ -173,17 +196,25 @@ export class TraktClient {
             ...options.headers
         };
         
-        const res = await fetch(`${TRAKT_API}${endpoint}`, {
-            ...options,
-            headers
-        });
+        try {
+            const res = await fetch(`${TRAKT_API}${endpoint}`, {
+                ...options,
+                headers
+            });
 
-        if (!res.ok) throw new Error(`API Request failed: ${res.status} ${await res.text()}`);
-        return res; 
+            if (!res.ok) {
+                const text = await res.text();
+                throw new Error(`API Request failed: ${res.status} ${text}`);
+            }
+            return res; 
+        } catch (error) {
+            console.error(`Fetch error for ${endpoint}:`, error);
+            throw error;
+        }
     }
 
-    async getHistory(type: 'movies' | 'episodes') {
-        let results: any[] = [];
+    async getHistory(type: 'movies' | 'episodes'): Promise<TraktHistoryItem[]> {
+        let results: TraktHistoryItem[] = [];
         let page = 1;
         const limit = 100; // Trakt limit
         
@@ -192,10 +223,11 @@ export class TraktClient {
         while (true) {
             const url = `/users/${this.username}/history/${type}?page=${page}&limit=${limit}`;
             const res = await this.fetch(url);
-            const data = await res.json();
+            const data = await res.json() as TraktHistoryItem[];
             results = results.concat(data);
             
-            const pageCount = parseInt(res.headers.get('x-pagination-page-count') || "1");
+            const pageCountHeader = res.headers.get('x-pagination-page-count');
+            const pageCount = pageCountHeader ? parseInt(pageCountHeader) : 1;
             process.stdout.write(`\rPage ${page}/${pageCount} (${results.length} items)`);
             
             if (page >= pageCount) break;
@@ -208,11 +240,9 @@ export class TraktClient {
     async removeHistory(ids: number[]) {
         if (ids.length === 0) return;
         
-        // Chunk ids if necessary (API limits usually exist, though delete usually handles batches)
-        const res = await this.fetch('/sync/history/remove', {
+        await this.fetch('/sync/history/remove', {
             method: 'POST',
             body: JSON.stringify({ ids })
         });
-        return res.json();
     }
 }
