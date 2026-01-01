@@ -1,27 +1,21 @@
 {
   "name": "trakt-manage",
-  "version": "1.0.0",
-  "description": "A Node.js utility for managing your Trakt.tv watch history",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js",
-    "view-recent": "node view-recent.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "version": "2.0.0",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest",
+    "drizzle-kit": "^0.30.0"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/nileshr/trakt-manage.git"
+  "peerDependencies": {
+    "typescript": "^5"
   },
-  "keywords": [
-    "trakt"
-  ],
-  "author": "Nilesh Rathi",
-  "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/nileshr/trakt-manage/issues"
-  },
-  "homepage": "https://github.com/nileshr/trakt-manage#readme",
   "dependencies": {
-    "axios": "^1.11.0"
+    "drizzle-orm": "^0.39.0",
+    "better-sqlite3": "^11.0.0"
+  },
+  "scripts": {
+    "build": "bun build ./index.ts --compile --outfile trakt-manage",
+    "dev": "bun run index.ts"
   }
 }
