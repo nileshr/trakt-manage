@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { initializeDatabase } from "./db";
+
 import { TraktClient, type TraktHistoryItem } from "./trakt";
 import { history } from "./db/schema";
 import { db } from "./db";
@@ -93,8 +93,6 @@ async function getHistoryFromDb(
 }
 
 async function main() {
-  initializeDatabase();
-
   const args = process.argv.slice(2);
   if (args.length === 0) {
     printHelp();
@@ -118,7 +116,11 @@ async function main() {
       const types = typeArg === "all" ? ["movies", "episodes"] : [typeArg];
 
       for (const t of types) {
-        const items = await client.getHistory(t as any);
+        if (t !== "movies" && t !== "episodes") {
+          console.error(`Invalid type: ${t}. Must be 'movies' or 'episodes'.`);
+          continue;
+        }
+        const items = await client.getHistory(t);
         await saveHistoryToDb(items, t);
       }
       return;
