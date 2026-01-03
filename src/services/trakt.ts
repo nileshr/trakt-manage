@@ -3,6 +3,7 @@ import * as readline from "readline";
 import type { Tokens, Credentials, TraktHistoryItem } from "../types";
 
 const TRAKT_API = "https://api.trakt.tv";
+const TOKEN_EXPIRATION_BUFFER_SECONDS = 300;
 
 function askQuestion(query: string): Promise<string> {
   const rl = readline.createInterface({
@@ -57,7 +58,12 @@ export class TraktClient {
   isTokenExpired() {
     if (!this.tokens) return true;
     const now = Math.floor(Date.now() / 1000);
-    return now >= this.tokens.created_at + this.tokens.expires_in - 300;
+    return (
+      now >=
+      this.tokens.created_at +
+        this.tokens.expires_in -
+        TOKEN_EXPIRATION_BUFFER_SECONDS
+    );
   }
 
   async authenticate() {
