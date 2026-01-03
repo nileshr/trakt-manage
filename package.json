@@ -14,7 +14,7 @@
     "drizzle-orm": "^0.39.0"
   },
   "scripts": {
-    "build": "bun build ./index.ts --compile --outfile trakt-manage",
+    "build": "bun build ./index.ts --compile --outfile trakt",
     "dev": "bun run index.ts",
     "db:push": "drizzle-kit push"
   }
