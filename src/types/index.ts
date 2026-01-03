@@ -15,6 +15,15 @@ export interface Credentials {
   username: string;
 }
 
+export interface TraktIds {
+  trakt: number;
+  slug?: string | null;
+  imdb?: string | null;
+  tmdb?: number | null;
+  tvdb?: number | null;
+  tvrage?: number | null;
+}
+
 export interface TraktHistoryItem {
   id: number;
   watched_at: string;
@@ -23,22 +32,33 @@ export interface TraktHistoryItem {
   movie?: {
     title: string;
     year: number;
-    ids: { trakt: number; slug: string; imdb: string; tmdb: number };
+    ids: TraktIds;
   };
   show?: {
     title: string;
     year: number;
-    ids: { trakt: number; slug: string; imdb: string; tmdb: number };
+    ids: TraktIds;
   };
   episode?: {
     season: number;
     number: number;
     title: string;
-    ids: { trakt: number; imdb: string; tmdb: number };
+    ids: TraktIds;
   };
 }
 
 export interface FindDuplicatesOptions {
   type: "movies" | "episodes";
   keepPerDay: boolean;
+}
+
+/**
+ * Type-safe helper to get the title from a TraktHistoryItem.
+ * Uses the item's type discriminant to access the correct property.
+ */
+export function getItemTitle(item: TraktHistoryItem): string {
+  if (item.type === "movie") {
+    return item.movie?.title ?? "Unknown";
+  }
+  return item.episode?.title ?? "Unknown";
 }
