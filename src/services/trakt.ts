@@ -1,6 +1,5 @@
 import { getJsonConfig, setJsonConfig } from "./config";
 import * as readline from "readline";
-import { existsSync, readFileSync } from "fs";
 import type { Tokens, Credentials, TraktHistoryItem } from "../types";
 
 const TRAKT_API = "https://api.trakt.tv";
@@ -26,23 +25,7 @@ export class TraktClient {
   private tokens: Tokens | null = null;
 
   async init() {
-    let creds = await getJsonConfig<Credentials>("credentials");
-
-    // Migration: Check for legacy file
-    if (!creds && existsSync("trakt_credentials.json")) {
-      console.log("Migrating credentials from trakt_credentials.json...");
-      try {
-        const data = JSON.parse(readFileSync("trakt_credentials.json", "utf8"));
-        creds = {
-          client_id: data.client_id,
-          client_secret: data.client_secret,
-          username: data.username,
-        };
-        await setJsonConfig("credentials", creds);
-      } catch (e) {
-        console.error("Failed to migrate credentials:", e);
-      }
-    }
+    const creds = await getJsonConfig<Credentials>("credentials");
 
     if (creds) {
       this.clientId = creds.client_id;
@@ -61,25 +44,6 @@ export class TraktClient {
     }
 
     this.tokens = await getJsonConfig<Tokens>("tokens");
-
-    // Migration: Check for legacy token file
-    if (!this.tokens && existsSync("trakt_token.json")) {
-      console.log("Migrating tokens from trakt_token.json...");
-      try {
-        const data = JSON.parse(readFileSync("trakt_token.json", "utf8"));
-        this.tokens = {
-          access_token: data.access_token,
-          refresh_token: data.refresh_token,
-          expires_in: data.expires_in,
-          created_at: data.created_at,
-        };
-        await setJsonConfig("tokens", this.tokens);
-      } catch (e) {
-        console.error("Failed to migrate tokens:", e);
-      }
-    }
-
-    // Don't auto auth here, do it on demand
   }
 
   async ensureAuth() {
