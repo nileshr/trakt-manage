@@ -20,19 +20,26 @@ export async function saveHistoryToDb(items: TraktHistoryItem[], type: string) {
     const batch = items.slice(i, i + batchSize);
     const values = batch.map((item) => {
       const entryType = type === "movies" ? "movie" : "episode";
-      const entryData = item[entryType] as any;
+      const entryData = item[entryType];
+      if (!entryData) {
+        console.error("Invalid history item:", item);
+        return null;
+      }
       return {
         traktId: entryData.ids.trakt,
         type: entryType,
         title: entryData.title,
-        year: entryData.year || null,
+        year: item.movie?.year ?? item.show?.year ?? null,
         season: item.episode?.season || null,
         episode: item.episode?.number || null,
         watchedAt: item.watched_at,
         rawJson: JSON.stringify(item),
       };
     });
-    await db.insert(history).values(values);
+    const validValues = values.filter((v) => v !== null);
+    if (validValues.length > 0) {
+      await db.insert(history).values(validValues);
+    }
   }
   console.log("Database updated.");
 }
