@@ -3,7 +3,7 @@
 import { TraktClient } from "../services/trakt";
 import { saveHistoryToDb, getHistoryFromDb } from "../services/history";
 import { findDuplicates } from "../utils";
-import type { TraktHistoryItem } from "../types";
+import { getItemTitle, type TraktHistoryItem } from "../types";
 import pkg from "../../package.json";
 import * as readline from "readline";
 
@@ -100,7 +100,6 @@ async function main() {
 
       const keepPerDay = !!opts.daily;
       const fix = !!opts.fix;
-      const entryType = typeArg === "movies" ? "movie" : "episode";
 
       console.log(`Loaded ${items.length} items from database.`);
 
@@ -114,8 +113,9 @@ async function main() {
       if (duplicates.length > 0) {
         // Print details
         for (const item of duplicates) {
-          const title = (item[entryType] as any)?.title ?? "Unknown";
-          console.log(`[${item.watched_at}] ${title} (${item.id})`);
+          console.log(
+            `[${item.watched_at}] ${getItemTitle(item)} (${item.id})`,
+          );
         }
 
         if (fix) {
@@ -164,9 +164,7 @@ async function main() {
       );
       console.log(`Found ${toRemove.length} items on ${date}`);
       toRemove.forEach((i: TraktHistoryItem) =>
-        console.log(
-          ` - ${(i[typeArg === "movies" ? "movie" : "episode"] as any)?.title ?? "Unknown"}`,
-        ),
+        console.log(` - ${getItemTitle(i)}`),
       );
 
       if (toRemove.length > 0) {
