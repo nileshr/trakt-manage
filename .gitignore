@@ -3,3 +3,5 @@ node_modules/
 trakt.db
 drizzle/
 .DS_Store
+trakt
+dist

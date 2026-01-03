@@ -15,7 +15,8 @@
     "drizzle-orm": "^0.39.0"
   },
   "scripts": {
-    "build": "bun build ./src/cli/index.ts --compile --outfile trakt",
+    "build": "bun build ./src/cli/index.ts --compile --outfile dist/trakt",
+    "install:local": "bun run build && sudo cp dist/trakt /usr/local/bin/",
     "dev": "bun run src/cli/index.ts",
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
