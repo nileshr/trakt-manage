@@ -57,13 +57,13 @@ async function main() {
 
   const command = args[0];
   const opts = parseOptions(args.slice(1));
-  const client = new TraktClient();
+  const traktClient = new TraktClient();
 
   try {
-    await client.init();
+    await traktClient.init();
 
     if (command === "auth") {
-      await client.authenticate();
+      await traktClient.authenticate();
       console.log("Authenticated successfully.");
       return;
     }
@@ -77,7 +77,7 @@ async function main() {
           console.error(`Invalid type: ${t}. Must be 'movies' or 'episodes'.`);
           continue;
         }
-        const items = await client.getHistory(t);
+        const items = await traktClient.getHistory(t);
         await saveHistoryToDb(items, t);
       }
       return;
@@ -94,7 +94,7 @@ async function main() {
       let items = await getHistoryFromDb(typeArg as "movies" | "episodes");
       if (items.length === 0) {
         console.log("No local history found. Syncing...");
-        items = await client.getHistory(typeArg as "movies" | "episodes");
+        items = await traktClient.getHistory(typeArg as "movies" | "episodes");
         await saveHistoryToDb(items, typeArg);
       }
 
@@ -128,10 +128,10 @@ async function main() {
             async (ans) => {
               if (ans.toLowerCase() === "y") {
                 const ids = duplicates.map((d) => d.id);
-                await client.removeHistory(ids);
+                await traktClient.removeHistory(ids);
                 console.log("Removed.");
                 // Resync
-                const newItems = await client.getHistory(
+                const newItems = await traktClient.getHistory(
                   typeArg as "movies" | "episodes",
                 );
                 await saveHistoryToDb(newItems, typeArg);
@@ -155,7 +155,7 @@ async function main() {
 
       let items = await getHistoryFromDb(typeArg as "movies" | "episodes");
       if (items.length === 0) {
-        items = await client.getHistory(typeArg as "movies" | "episodes");
+        items = await traktClient.getHistory(typeArg as "movies" | "episodes");
         await saveHistoryToDb(items, typeArg);
       }
 
@@ -176,12 +176,12 @@ async function main() {
         });
         rl.question("Remove these plays? (y/N) ", async (ans) => {
           if (ans.toLowerCase() === "y") {
-            await client.removeHistory(
+            await traktClient.removeHistory(
               toRemove.map((i: TraktHistoryItem) => i.id),
             );
             console.log("Removed.");
             // Resync
-            const newItems = await client.getHistory(
+            const newItems = await traktClient.getHistory(
               typeArg as "movies" | "episodes",
             );
             await saveHistoryToDb(newItems, typeArg);
