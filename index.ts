@@ -6,6 +6,7 @@ import { db } from "./db";
 import { eq, and } from "drizzle-orm";
 import pkg from "./package.json";
 import * as readline from "readline";
+import { findDuplicates } from "./logic";
 
 function printHelp() {
     console.log(`
@@ -31,16 +32,18 @@ Options:
 function parseOptions(args: string[]) {
     const opts: any = { args: [] };
     for (let i = 0; i < args.length; i++) {
-        if (args[i].startsWith('--')) {
-            const key = args[i].slice(2);
-            if (i + 1 < args.length && !args[i+1].startsWith('--')) {
+        const arg = args[i];
+        if (arg?.startsWith('--')) {
+            const key = arg.slice(2);
+            const nextArg = args[i+1];
+            if (i + 1 < args.length && nextArg && !nextArg.startsWith('--')) {
                  opts[key] = args[i+1];
                  i++;
             } else {
                  opts[key] = true;
             }
         } else {
-            opts.args.push(args[i]);
+            opts.args.push(arg);
         }
     }
     return opts;
@@ -104,7 +107,7 @@ async function main() {
         }
 
         if (command === 'sync') {
-            const typeArg = opts.args[0] || 'all';
+            const typeArg = opts.args[0] || opts.type || 'all';
             const types = typeArg === 'all' ? ['movies', 'episodes'] : [typeArg];
             
             for (const t of types) {
@@ -115,7 +118,7 @@ async function main() {
         }
 
         if (command === 'duplicates') {
-            const typeArg = opts.args[0];
+            const typeArg = opts.args[0] || opts.type;
             if (!typeArg || (typeArg !== 'movies' && typeArg !== 'episodes')) {
                 console.error("Please specify type: movies or episodes");
                 return;
@@ -133,27 +136,12 @@ async function main() {
             const fix = !!opts.fix;
             const entryType = typeArg === 'movies' ? 'movie' : 'episode';
             
-            const seen: Record<string, string> = {}; // id -> date
-            const duplicates: TraktHistoryItem[] = [];
-            const duplicateGroups: Record<string, TraktHistoryItem[]> = {};
-
-            const sortedItems = [...items].sort((a, b) => new Date(a.watched_at).getTime() - new Date(b.watched_at).getTime());
+            console.log(`Loaded ${items.length} items from database.`);
             
-            for (const item of sortedItems) {
-                // @ts-ignore
-                const traktId = item[entryType].ids.trakt;
-                const date = item.watched_at.split('T')[0];
-                
-                if (seen[traktId]) {
-                    if (!keepPerDay || seen[traktId] === date) {
-                        duplicates.push(item);
-                        if (!duplicateGroups[traktId]) duplicateGroups[traktId] = [];
-                        duplicateGroups[traktId].push(item);
-                    }
-                } else {
-                    seen[traktId] = date;
-                }
-            }
+            const duplicates = findDuplicates(items, { 
+                type: typeArg as 'movies' | 'episodes', 
+                keepPerDay 
+            });
 
             console.log(`Found ${duplicates.length} duplicates.`);
             
@@ -225,3 +213,5 @@ async function main() {
         process.exit(1);
     }
 }
+
+main();
