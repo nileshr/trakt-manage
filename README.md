@@ -12,7 +12,7 @@ A utility for managing your Trakt.tv watch history. Clean up duplicates, remove 
 
 ## Prerequisites
 
-- Node.js (v12 or higher) or Bun
+- [Bun](https://bun.sh) runtime
 - Trakt.tv account and API application
 
 ## Setup
@@ -30,6 +30,25 @@ A utility for managing your Trakt.tv watch history. Clean up duplicates, remove 
    ```bash
    bun run dev
    ```
+
+## Project Structure
+
+```
+src/
+├── cli/           # CLI entry point and command handling
+│   └── index.ts
+├── db/            # Database connection and schema
+│   ├── index.ts
+│   └── schema.ts
+├── services/      # Business logic
+│   ├── config.ts  # Configuration management
+│   ├── history.ts # Local history storage
+│   └── trakt.ts   # Trakt API client
+├── types/         # Shared TypeScript interfaces
+│   └── index.ts
+└── utils/         # Utility functions
+    └── index.ts
+```
 
 ## Trakt.tv API Setup
 
