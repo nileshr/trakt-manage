@@ -16,7 +16,13 @@ export async function setConfig(key: string, value: string) {
 
 export async function getJsonConfig<T>(key: string): Promise<T | null> {
   const val = await getConfig(key);
-  return val ? JSON.parse(val) : null;
+  if (!val) return null;
+  try {
+    return JSON.parse(val) as T;
+  } catch (e) {
+    console.error(`Failed to parse JSON for config key "${key}":`, e);
+    return null;
+  }
 }
 
 export async function setJsonConfig(key: string, value: any) {
